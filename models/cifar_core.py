@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from models import basenet
 from models import dataloader
 import utils

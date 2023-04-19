@@ -438,5 +438,4 @@ if __name__ == '__main__':
     print('Preparing celeba experiment data')
     create_celeba_data('./data/celeba/images')
     print('Finshed')
-
     
