@@ -8,18 +8,25 @@ class CifarDataset(torch.utils.data.Dataset):
     """Cifar dataloader, output image and target"""
     
     def __init__(self, image_path, target_path, transform=None):
+        self.image_tensors = []
+        self.target_tensors = []
         with open(image_path, 'rb') as f:
             self.images = pickle.load(f)
         with open(target_path, 'rb') as f:
             self.targets = pickle.load(f)
         self.transform = transform
 
-    def __getitem__(self, index):
-        img, target = self.images[index], self.targets[index]
-        img = Image.fromarray(img)
+        for img in self.images:
+            img = Image.fromarray(img)
+            if self.transform is not None:
+                img = self.transform(img)
+                self.image_tensors.append(img.to('cuda'))
 
-        if self.transform is not None:
-            img = self.transform(img)
+        for target in self.targets:
+            self.target_tensors.append(torch.tensor(target, device='cuda'))
+
+    def __getitem__(self, index):
+        img, target = self.image_tensors[index], self.target_tensors[index]
 
         return img, target
 

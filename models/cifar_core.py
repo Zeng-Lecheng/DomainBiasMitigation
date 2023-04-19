@@ -75,13 +75,13 @@ class CifarModel():
 
         self.train_loader = torch.utils.data.DataLoader(
                                  train_data, batch_size=opt['batch_size'],
-                                 shuffle=True, num_workers=1)
+                                 shuffle=True, num_workers=0)
         self.test_color_loader = torch.utils.data.DataLoader(
                                       test_color_data, batch_size=opt['batch_size'],
-                                      shuffle=False, num_workers=1)
+                                      shuffle=False, num_workers=0)
         self.test_gray_loader = torch.utils.data.DataLoader(
                                      test_gray_data, batch_size=opt['batch_size'],
-                                     shuffle=False, num_workers=1)
+                                     shuffle=False, num_workers=0)
     
     def set_optimizer(self, opt):
         optimizer_setting = opt['optimizer_setting']
@@ -126,7 +126,7 @@ class CifarModel():
         total = 0
         correct = 0
         for i, (images, targets) in enumerate(loader):
-            images, targets = images.to(self.device), targets.to(self.device)
+            images, targets = images, targets
             self.optimizer.zero_grad()
             outputs, _ = self.forward(images)
             loss = self._criterion(outputs, targets)
@@ -167,7 +167,7 @@ class CifarModel():
         predict_list = []
         with torch.no_grad():
             for i, (images, targets) in enumerate(loader):
-                images, targets = images.to(self.device), targets.to(self.device)
+                images, targets = images, targets
                 outputs, features = self.forward(images)
                 loss = self._criterion(outputs, targets)
                 test_loss += loss.item()
