@@ -59,7 +59,7 @@ class CifarDomainIndependent(CifarModel):
         }
         return test_result
     
-    def compute_accuracy_conditional(self, outputs, targets, test_on_color):
+    def compute_accuracy_conditional(self, outputs, targets, test_on_color): # eq. 7
         outputs = outputs.cpu().numpy()
         targets = targets.cpu().numpy()
         
@@ -77,7 +77,7 @@ class CifarDomainIndependent(CifarModel):
         targets = targets.cpu().numpy()
         
         class_num = outputs.shape[1] // 2
-        predictions = np.argmax(outputs[:, :class_num] + outputs[:, class_num:], axis=1)
+        predictions = np.argmax(outputs[:, :class_num] + outputs[:, class_num:], axis=1)    # Eq.9
         accuracy = (predictions == targets).mean() * 100.
         return accuracy
 
