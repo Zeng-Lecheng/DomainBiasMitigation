@@ -97,6 +97,25 @@ class ResNet(nn.Module):
         out = self.linear(feature)
         return out, feature
 
+
+class ResNetDuoOut(ResNet):
+    def __init__(self, block, num_blocks, num_classes=10):
+        super().__init__(block, num_blocks, num_classes)
+        self.linear_1 = nn.Linear(512 * block.expansion, num_classes // 2)  # assume even num
+        self.linear_2 = nn.Linear(512 * block.expansion, num_classes // 2)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = self.layer4(out)
+        out = F.avg_pool2d(out, 4)
+        feature = out.view(out.size(0), -1)
+        out_1 = self.linear_1(feature)
+        out_2 = self.linear_2(feature)
+        return out_1, out_2, feature
+
 class ResNet_base(nn.Module):
     def __init__(self, block, num_blocks):
         super(ResNet_base, self).__init__()
@@ -129,6 +148,9 @@ class ResNet_base(nn.Module):
     
 def ResNet18(num_classes=10):
     return ResNet(BasicBlock, [2,2,2,2], num_classes=num_classes)
+
+def ResNet18_duo(num_classes=10):
+    return ResNetDuoOut(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
 
 def ResNet18_base():
     """ResNet18 but without the final fc layer"""

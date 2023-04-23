@@ -14,13 +14,49 @@ import utils
 class CifarDomainIndependent(CifarModel):
     def __init__(self, opt):
         super(CifarDomainIndependent, self).__init__(opt)
+
+    def set_network(self, opt):
+        self.network = basenet.ResNet18_duo(num_classes=opt['output_dim']).to(self.device)
+
+    def forward(self, x):
+        return self.network(x)  # out_1, out_2, feature
+
+    def _train(self, loader):
+        self.network.train()
+        self.adjust_lr()
+
+        train_loss = 0
+        total = 0
+        correct = 0
+        for i, (images, targets) in enumerate(loader):
+            self.optimizer.zero_grad()
+            out_1, out_2, _ = self.forward(images)
+            loss = self._criterion(out_1, out_2, targets)
+            loss.backward()
+            self.optimizer.step()
+
+            train_loss += loss.item()
+            train_result = {
+                'loss': loss.item(),
+            }
+            self.log_result('Train iteration', train_result, len(loader) * self.epoch + i)
+
+            if self.print_freq and (i % self.print_freq == 0):
+                print(f'Training epoch {self.epoch}: [{i + 1}|{len(loader)}], loss: {loss.item()}')
+
+        self.epoch += 1
     
-    def _criterion(self, output, target):
-        class_num = output.size(1) // 2
-        logprob_first_half = F.log_softmax(output[:, :class_num], dim=1)
-        logprob_second_half = F.log_softmax(output[:, class_num:], dim=1)
-        output = torch.cat((logprob_first_half, logprob_second_half), dim=1)
-        return F.nll_loss(output, target)
+    def _criterion(self, out_1, out_2, target):
+        class_num = out_1.size(1)
+        out_1 = F.pad(out_1, (0, class_num, 0, 0), 'constant', out_1.mean().item())   # fill 0 to the right
+        logprob_first_half = F.log_softmax(out_1, dim=1)
+        out_1_loss = F.nll_loss(logprob_first_half, target)
+
+        out_2 = F.pad(out_2, (class_num, 0, 0, 0), 'constant', out_2.mean().item())   # fill 0 to the left
+        logprob_second_half = F.log_softmax(out_2, dim=1)
+        out_2_loss = F.nll_loss(logprob_second_half, target)
+
+        return out_1_loss + out_2_loss
         
     def _test(self, loader, test_on_color=True):
         """Test the model performance"""
@@ -36,9 +72,10 @@ class CifarDomainIndependent(CifarModel):
         with torch.no_grad():
             for i, (images, targets) in enumerate(loader):
                 images, targets = images.to(self.device), targets.to(self.device)
-                outputs, features = self.forward(images)
-                loss = self._criterion(outputs, targets)
+                out_1, out_2, features = self.forward(images)
+                loss = self._criterion(out_1, out_2, targets)
                 test_loss += loss.item()
+                outputs = torch.cat((out_1, out_2), dim=1)
 
                 output_list.append(outputs)
                 feature_list.append(features)

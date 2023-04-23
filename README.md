@@ -1,3 +1,5 @@
+Domain independent training test 1, see `_criterion` in `cifar_domain_independent.py`
+----
 # Effective Strategies for Bias Mitigation
 Code for the CVPR paper:
 

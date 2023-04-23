@@ -15,15 +15,16 @@ class CifarDataset(torch.utils.data.Dataset):
         with open(target_path, 'rb') as f:
             self.targets = pickle.load(f)
         self.transform = transform
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         for img in self.images:
             img = Image.fromarray(img)
             if self.transform is not None:
                 img = self.transform(img)
-                self.image_tensors.append(img.to('cuda'))
+                self.image_tensors.append(img.to(device))
 
         for target in self.targets:
-            self.target_tensors.append(torch.tensor(target, device='cuda'))
+            self.target_tensors.append(torch.tensor(target, device=device))
 
     def __getitem__(self, index):
         img, target = self.image_tensors[index], self.target_tensors[index]
