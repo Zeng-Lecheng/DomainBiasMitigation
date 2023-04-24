@@ -48,13 +48,17 @@ class CifarDomainIndependent(CifarModel):
     
     def _criterion(self, out_1, out_2, target):
         class_num = out_1.size(1)
-        out_1 = F.pad(out_1, (0, class_num, 0, 0), 'constant', out_1.mean().item())   # fill 0 to the right
+        mask_1 = target < class_num
+        out_1 = out_1[mask_1]
+        target_1 = target[mask_1]
         logprob_first_half = F.log_softmax(out_1, dim=1)
-        out_1_loss = F.nll_loss(logprob_first_half, target)
+        out_1_loss = F.nll_loss(logprob_first_half, target_1)
 
-        out_2 = F.pad(out_2, (class_num, 0, 0, 0), 'constant', out_2.mean().item())   # fill 0 to the left
+        mask_2 = target >= class_num
+        out_2 = out_2[mask_2]
+        target_2 = target[mask_2] - class_num
         logprob_second_half = F.log_softmax(out_2, dim=1)
-        out_2_loss = F.nll_loss(logprob_second_half, target)
+        out_2_loss = F.nll_loss(logprob_second_half, target_2)
 
         return out_1_loss + out_2_loss
         
