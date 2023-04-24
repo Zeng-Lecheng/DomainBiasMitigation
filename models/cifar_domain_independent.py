@@ -106,38 +106,53 @@ class CifarDomainIndependent(CifarModel):
         features = torch.cat(feature_list, dim=0)
         targets = torch.cat(target_list, dim=0)
         
-        accuracy_conditional = self.compute_accuracy_conditional(outputs, targets, test_on_color)
-        accuracy_sum_out = self.compute_accuracy_sum_out(outputs, targets)
+        accuracy_conditional, class_count_conditional = self.compute_accuracy_conditional(outputs, targets, test_on_color)
+        accuracy_sum_out, class_count_sum_out = self.compute_accuracy_sum_out(outputs, targets)
         
         test_result = {
             'accuracy_conditional': accuracy_conditional,
             'accuracy_sum_out': accuracy_sum_out,
             'outputs': outputs.cpu().numpy(),
-            'features': features.cpu().numpy()
+            'features': features.cpu().numpy(),
+            'class_count_conditional': class_count_conditional,
+            'class_count_sum_out': class_count_sum_out
         }
         return test_result
     
     def compute_accuracy_conditional(self, outputs, targets, test_on_color): # eq. 7
+
         outputs = outputs.cpu().numpy()
         targets = targets.cpu().numpy()
-        
+
         class_num = outputs.shape[1] // 2
+        class_count = [0] * class_num
+
         if test_on_color:
             outputs = outputs[:, :class_num]
         else:
             outputs = outputs[:, class_num:]
         predictions = np.argmax(outputs, axis=1)
+
+        for pred in predictions:
+            class_count[pred] += 1
+
         accuracy = (predictions == targets).mean() * 100.
-        return accuracy
+        return accuracy, class_count
     
     def compute_accuracy_sum_out(self, outputs, targets):
         outputs = outputs.cpu().numpy()
         targets = targets.cpu().numpy()
         
         class_num = outputs.shape[1] // 2
+        class_count = [0] * class_num
+
         predictions = np.argmax(outputs[:, :class_num] + outputs[:, class_num:], axis=1)    # Eq.9
+
+        for pred in predictions:
+            class_count[pred] += 1
+
         accuracy = (predictions == targets).mean() * 100.
-        return accuracy
+        return accuracy, class_count
 
     def test(self):
         # Test and save the result
@@ -147,6 +162,19 @@ class CifarDomainIndependent(CifarModel):
         test_gray_result = self._test(self.test_gray_loader, test_on_color=False)
         utils.save_pkl(test_color_result, os.path.join(self.save_path, 'test_color_result.pkl'))
         utils.save_pkl(test_gray_result, os.path.join(self.save_path, 'test_gray_result.pkl'))
+
+        bias_sum_conditional = 0
+        bias_sum_sum_out = 0
+        for i in range(10):
+            color_class = test_color_result['class_count_conditional'][i]
+            gray_class = test_gray_result['class_count_conditional'][i]
+            bias_sum_conditional += max(color_class, gray_class) / (color_class + gray_class)
+        bias_conditional = bias_sum_conditional / 10 - 0.5
+        for i in range(10):
+            color_class = test_color_result['class_count_sum_out'][i]
+            gray_class = test_gray_result['class_count_sum_out'][i]
+            bias_sum_sum_out += max(color_class, gray_class) / (color_class + gray_class)
+        bias_sum_out = bias_sum_sum_out / 10 - 0.5
         
         # Output the classification accuracy on test set for different inference
         # methods
@@ -154,10 +182,15 @@ class CifarDomainIndependent(CifarModel):
                 'Test on color images accuracy sum out: {}\n'
                 'Test on gray images accuracy conditional: {}\n'
                 'Test on gray images accuracy sum out: {}\n'
+                'Bias conditional: {}\n'
+                'Bias sum out: {}'
                 .format(test_color_result['accuracy_conditional'],
                         test_color_result['accuracy_sum_out'],
                         test_gray_result['accuracy_conditional'],
-                        test_gray_result['accuracy_sum_out']))
+                        test_gray_result['accuracy_sum_out'],
+                        bias_conditional,
+                        bias_sum_out
+                        ))
         utils.write_info(os.path.join(self.save_path, 'test_result.txt'), info)
     
     

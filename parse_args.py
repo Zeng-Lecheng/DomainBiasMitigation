@@ -69,7 +69,7 @@ def create_exerpiment_setting(opt):
         opt['device'] = torch.device('cuda' if opt['cuda'] else 'cpu')
         opt['print_freq'] = 50
         opt['batch_size'] = 128
-        opt['total_epochs'] = 100
+        opt['total_epochs'] = 400
         opt['save_folder'] = os.path.join('record/'+opt['experiment'], 
                                           opt['experiment_name'])
         utils.creat_folder(opt['save_folder'])
@@ -182,13 +182,6 @@ def create_exerpiment_setting(opt):
         
     elif opt['experiment'] == 'cifar-s_domain_independent':
         opt['output_dim'] = 20
-        optimizer_setting = {
-            'optimizer': torch.optim.SGD,
-            'lr': 1e-4,
-            'momentum': 0.9,
-            'weight_decay': 5e-4,
-        }
-        opt['optimizer_setting'] = optimizer_setting
         data_setting = {
             'train_data_path': './data/cifar-s/p95.0/train_imgs',
             'train_label_path': './data/cifar-s/p95.0/train_2n_labels',
