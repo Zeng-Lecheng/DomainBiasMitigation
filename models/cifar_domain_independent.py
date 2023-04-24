@@ -36,13 +36,19 @@ class CifarDomainIndependent(CifarModel):
             self.optimizer.step()
 
             train_loss += loss.item()
+            outputs = torch.cat((out_1, out_2), dim=1)
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+            accuracy = correct * 100. / total
             train_result = {
+                'accuracy': correct * 100. / total,
                 'loss': loss.item(),
             }
             self.log_result('Train iteration', train_result, len(loader) * self.epoch + i)
 
             if self.print_freq and (i % self.print_freq == 0):
-                print(f'Training epoch {self.epoch}: [{i + 1}|{len(loader)}], loss: {loss.item()}')
+                print(f'Training epoch {self.epoch}: [{i + 1}|{len(loader)}], loss: {loss.item()}, accuracy: {accuracy}')
 
         self.epoch += 1
     
