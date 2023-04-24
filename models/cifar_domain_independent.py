@@ -31,10 +31,7 @@ class CifarDomainIndependent(CifarModel):
         for i, (images, targets) in enumerate(loader):
             self.optimizer.zero_grad()
             out_1, out_2, _ = self.forward(images)
-            if self.epoch % 2 == 0:
-                loss = self._criterion(out_1, None, targets)
-            else:
-                loss = self._criterion(None, out_2, targets)
+            loss = self._criterion(out_1, out_2, targets)
             loss.backward()
             self.optimizer.step()
 
@@ -51,33 +48,25 @@ class CifarDomainIndependent(CifarModel):
             self.log_result('Train iteration', train_result, len(loader) * self.epoch + i)
 
             if self.print_freq and (i % self.print_freq == 0):
-                print(f'Training epoch {self.epoch}: [{i + 1}|{len(loader)}], loss: {loss.item()}, '
-                      f'accuracy: {accuracy}')
+                print(f'Training epoch {self.epoch}: [{i + 1}|{len(loader)}], loss: {loss.item()}, accuracy: {accuracy}')
 
         self.epoch += 1
     
     def _criterion(self, out_1, out_2, target):
-        class_num = out_1.size(1) if out_1 is not None else out_2.size(1)
-        if out_2 is None:
-            mask = target < 10
-            out_1 = out_1[mask]
-            target_1 = target[mask]
-            logprob_first_half = F.log_softmax(out_1, dim=1)
-            output = F.nll_loss(logprob_first_half, target_1)
-        elif out_1 is None:
-            mask = target >= 10
-            out_2 = out_2[mask]
-            target_2 = target[mask] - 10
-            logprob_second_half = F.log_softmax(out_2, dim=1)
-            output = F.nll_loss(logprob_second_half, target_2)
-        else:
-            # None of outs are None, in tests
-            logprob_first_half = F.log_softmax(out_1, dim=1)
-            logprob_second_half = F.log_softmax(out_2, dim=1)
-            output = torch.cat((logprob_first_half, logprob_second_half), dim=1)
-            output = F.nll_loss(output, target)
+        class_num = out_1.size(1)
+        mask_1 = target < class_num
+        out_1 = out_1[mask_1]
+        target_1 = target[mask_1]
+        logprob_first_half = F.log_softmax(out_1, dim=1)
+        out_1_loss = F.nll_loss(logprob_first_half, target_1)
 
-        return output
+        mask_2 = target >= class_num
+        out_2 = out_2[mask_2]
+        target_2 = target[mask_2] - class_num
+        logprob_second_half = F.log_softmax(out_2, dim=1)
+        out_2_loss = F.nll_loss(logprob_second_half, target_2)
+
+        return out_1_loss + out_2_loss
         
     def _test(self, loader, test_on_color=True):
         """Test the model performance"""
