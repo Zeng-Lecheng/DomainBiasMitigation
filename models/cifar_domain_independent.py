@@ -30,6 +30,7 @@ class CifarDomainIndependent(CifarModel):
         total = 0
         correct = 0
         for i, (images, targets) in enumerate(loader):
+            images, targets = images.to(self.device), targets.to(self.device)
             self.optimizer.zero_grad()
             out_1, out_2, _ = self.forward(images)
             if self.epoch % 2 == 0:

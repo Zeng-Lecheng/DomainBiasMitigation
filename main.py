@@ -1,11 +1,12 @@
 import parse_args
 import utils
+from tqdm import tqdm
 
 def main(model, opt):
     utils.set_random_seed(opt['random_seed'])
     
     if not opt['test_mode']:
-        for epoch in range(opt['total_epochs']):
+        for epoch in tqdm(range(opt['total_epochs'])):
             model.train()
     
     model.test()
