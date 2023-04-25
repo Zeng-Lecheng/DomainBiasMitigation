@@ -10,189 +10,183 @@ import torchvision.transforms as transforms
 from tensorboardX import SummaryWriter
 from models import basenet
 from models import dataloader
-from models.cifar_core import CifarModel
+from models.celeba_core import CelebaModel
 import utils
 
-
-class CifarDomainIndependent(CifarModel):
+class CelebaDomainIndependent(CelebaModel):
     def __init__(self, opt):
-        super(CifarDomainIndependent, self).__init__(opt)
-
-    def set_network(self, opt):
-        self.network = basenet.ResNet18_duo(num_classes=opt['output_dim']).to(self.device)
-
-    def forward(self, x):
-        return self.network(x)  # out_1, out_2, feature
-
-    def _train(self, loader):
-        self.network.train()
-        self.adjust_lr()
-
-        train_loss = 0
-        total = 0
-        correct = 0
-        for i, (images, targets) in enumerate(loader):
-            self.optimizer.zero_grad()
-            out_1, out_2, _ = self.forward(images)
-            if self.epoch % 2 == 0:
-                loss = self._criterion(out_1, None, targets)
-            else:
-                loss = self._criterion(None, out_2, targets)
-            loss.backward()
-            self.optimizer.step()
-
-            train_loss += loss.item()
-            outputs = torch.cat((out_1, out_2), dim=1)
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-            accuracy = correct * 100. / total
-            train_result = {
-                'accuracy': correct * 100. / total,
-                'loss': loss.item(),
-            }
-            self.log_result('Train iteration', train_result, len(loader) * self.epoch + i)
-
-            if self.print_freq and (i % self.print_freq == 0):
-                print(f'Training epoch {self.epoch}: [{i + 1}|{len(loader)}], loss: {loss.item()}, '
-                      f'accuracy: {accuracy}')
-
-        self.epoch += 1
-
-    def _criterion(self, out_1, out_2, target):
-        class_num = out_1.size(1) if out_1 is not None else out_2.size(1)
-        if out_2 is None:
-            mask = target < 10
-            out_1 = out_1[mask]
-            target_1 = target[mask]
-            logprob_first_half = F.log_softmax(out_1, dim=1)
-            output = F.nll_loss(logprob_first_half, target_1)
-        elif out_1 is None:
-            mask = target >= 10
-            out_2 = out_2[mask]
-            target_2 = target[mask] - 10
-            logprob_second_half = F.log_softmax(out_2, dim=1)
-            output = F.nll_loss(logprob_second_half, target_2)
+        super(CelebaDomainIndependent, self).__init__(opt)
+        self.best_dev_mAP_conditional = 0.
+        self.best_dev_mAP_max = 0.
+        self.best_dev_mAP_sum_prob = 0.
+        self.best_dev_mAP_sum_out = 0.
+        
+    def _criterion(self, output, target):
+        domain_label = target[:, -1:]
+        class_num = output.size(1) // 2
+        loss = F.binary_cross_entropy_with_logits(
+                   domain_label*output[:, :class_num]
+                       + (1-domain_label)*output[:, class_num:],
+                   target[:, :-1])
+        return loss
+    
+    def inference_conditional(self, output, target):
+        """Inference method: condition on the known domain"""
+        
+        domain_label = target[:, -1:]
+        predict_prob = torch.sigmoid(output).cpu().numpy()
+        class_num = predict_prob.shape[1] // 2
+        predict_prob = domain_label*predict_prob[:, :class_num] \
+                       + (1-domain_label)*predict_prob[:, class_num:]
+        return predict_prob
+    
+    def inference_max(self, output):
+        """Inference method: choose the max of the two domains"""
+        
+        predict_prob = torch.sigmoid(output).cpu().numpy()
+        class_num = predict_prob.shape[1] // 2
+        predict_prob = np.maximum(predict_prob[:, :class_num],
+                                  predict_prob[:, class_num:])
+        return predict_prob
+    
+    def inference_sum_prob(self, output):
+        """Inference method: sum the probability from two domains"""
+        
+        predict_prob = torch.sigmoid(output).cpu().numpy()
+        class_num = predict_prob.shape[1] // 2
+        predict_prob = predict_prob[:, :class_num] + predict_prob[:, class_num:]
+        return predict_prob
+    
+    def inference_sum_out(self, output):
+        """Inference method: sum the output from two domains"""
+        
+        class_num = output.size(1) // 2
+        return (output[:, :class_num] + output[:, class_num:]).cpu().numpy()
+    
+    def train(self):
+        """Train the model for one epoch, evaluate on validation set and 
+        save the best model for each inference method
+        """
+        
+        start_time = datetime.now()
+        self._train(self.train_loader)
+        utils.save_state_dict(self.state_dict(), os.path.join(self.save_path, 'ckpt.pth'))
+        dev_loss, dev_output, _ = self._test(self.dev_loader)
+        
+        dev_predict_conditional = self.inference_conditional(dev_output, self.dev_target)
+        dev_per_class_AP_conditional = utils.compute_weighted_AP(self.dev_target,
+                                            dev_predict_conditional, self.dev_class_weight)
+        dev_mAP_conditional = utils.compute_mAP(dev_per_class_AP_conditional, self.subclass_idx)
+        if dev_mAP_conditional > self.best_dev_mAP_conditional:
+            self.best_dev_mAP_conditional = dev_mAP_conditional
+            utils.save_state_dict(self.state_dict(), os.path.join(self.save_path, 'best-conditional.pth'))
+            
+        dev_predict_max = self.inference_max(dev_output)
+        dev_per_class_AP_max = utils.compute_weighted_AP(self.dev_target, 
+                                    dev_predict_max, self.dev_class_weight)
+        dev_mAP_max = utils.compute_mAP(dev_per_class_AP_max, self.subclass_idx)
+        if dev_mAP_max > self.best_dev_mAP_max:
+            self.best_dev_mAP_max = dev_mAP_max
+            utils.save_state_dict(self.state_dict(), os.path.join(self.save_path, 'best-max.pth'))
+            
+        dev_predict_sum_prob = self.inference_sum_prob(dev_output)
+        dev_per_class_AP_sum_prob = utils.compute_weighted_AP(self.dev_target,
+                                         dev_predict_sum_prob, self.dev_class_weight)
+        dev_mAP_sum_prob = utils.compute_mAP(dev_per_class_AP_sum_prob, self.subclass_idx)
+        if dev_mAP_sum_prob > self.best_dev_mAP_sum_prob:
+            self.best_dev_mAP_sum_prob = dev_mAP_sum_prob
+            utils.save_state_dict(self.state_dict(), os.path.join(self.save_path, 'best-sum_prob.pth'))
+            
+        dev_predict_sum_out = self.inference_sum_out(dev_output)
+        dev_per_class_AP_sum_out = utils.compute_weighted_AP(self.dev_target,
+                                         dev_predict_sum_out, self.dev_class_weight)
+        dev_mAP_sum_out = utils.compute_mAP(dev_per_class_AP_sum_out, self.subclass_idx)
+        if dev_mAP_sum_out > self.best_dev_mAP_sum_out:
+            self.best_dev_mAP_sum_out = dev_mAP_sum_out
+            utils.save_state_dict(self.state_dict(), os.path.join(self.save_path, 'best-sum_out.pth'))
+        
+        self.log_result('Dev epoch', 
+                        {
+                            'loss': dev_loss/len(self.dev_loader), 
+                            'mAP_conditional': dev_mAP_conditional,
+                            'mAP_max': dev_mAP_max,
+                            'mAP_sum_prob': dev_mAP_sum_prob,
+                            'mAP_sum_out': dev_mAP_sum_out,
+                        },
+                        self.epoch)
+        
+        duration = datetime.now() - start_time
+        print(('Finish training epoch {}, dev mAP conditional: {}'
+               'dev mAP max: {}, dev mAP sum prob: {}, '
+               'dev mAP sum out: {}, time used: {}').format(self.epoch, dev_mAP_conditional,
+                    dev_mAP_max, dev_mAP_sum_prob, dev_mAP_sum_out, duration))
+        
+    def _compute_result(self, model_name, data_loader, target, class_weight,
+                          inference_fn, save_name, conditional=False):
+        """Load model and compute performance with given inference method"""
+        
+        state_dict = torch.load(os.path.join(self.save_path, model_name))
+        self.network.load_state_dict(state_dict['model'])
+        loss, output, feature = self._test(data_loader)
+        if conditional:
+            predict = inference_fn(output, target)
         else:
-            # None of outs are None, in tests
-            logprob_first_half = F.log_softmax(out_1, dim=1)
-            logprob_second_half = F.log_softmax(out_2, dim=1)
-            output = torch.cat((logprob_first_half, logprob_second_half), dim=1)
-            output = F.nll_loss(output, target)
-
-        return output
-
-    def _test(self, loader, test_on_color=True):
-        """Test the model performance"""
-
-        self.network.eval()
-
-        total = 0
-        correct = 0
-        test_loss = 0
-        output_list = []
-        feature_list = []
-        target_list = []
-        with torch.no_grad():
-            for i, (images, targets) in enumerate(loader):
-                images, targets = images.to(self.device), targets.to(self.device)
-                out_1, out_2, features = self.forward(images)
-                loss = self._criterion(out_1, out_2, targets)
-                test_loss += loss.item()
-                outputs = torch.cat((out_1, out_2), dim=1)
-
-                output_list.append(outputs)
-                feature_list.append(features)
-                target_list.append(targets)
-
-        outputs = torch.cat(output_list, dim=0)
-        features = torch.cat(feature_list, dim=0)
-        targets = torch.cat(target_list, dim=0)
-
-        accuracy_conditional, class_count_conditional = self.compute_accuracy_conditional(outputs, targets,
-                                                                                          test_on_color)
-        accuracy_sum_out, class_count_sum_out = self.compute_accuracy_sum_out(outputs, targets)
-
-        test_result = {
-            'accuracy_conditional': accuracy_conditional,
-            'accuracy_sum_out': accuracy_sum_out,
-            'outputs': outputs.cpu().numpy(),
-            'features': features.cpu().numpy(),
-            'class_count_conditional': class_count_conditional,
-            'class_count_sum_out': class_count_sum_out
-        }
-        return test_result
-
-    def compute_accuracy_conditional(self, outputs, targets, test_on_color):  # eq. 7
-
-        outputs = outputs.cpu().numpy()
-        targets = targets.cpu().numpy()
-
-        class_num = outputs.shape[1] // 2
-        class_count = [0] * class_num
-
-        if test_on_color:
-            outputs = outputs[:, :class_num]
-        else:
-            outputs = outputs[:, class_num:]
-        predictions = np.argmax(outputs, axis=1)
-
-        for pred in predictions:
-            class_count[pred] += 1
-
-        accuracy = (predictions == targets).mean() * 100.
-        return accuracy, class_count
-
-    def compute_accuracy_sum_out(self, outputs, targets):
-        outputs = outputs.cpu().numpy()
-        targets = targets.cpu().numpy()
-
-        class_num = outputs.shape[1] // 2
-        class_count = [0] * class_num
-
-        predictions = np.argmax(outputs[:, :class_num] + outputs[:, class_num:], axis=1)  # Eq.9
-
-        for pred in predictions:
-            class_count[pred] += 1
-
-        accuracy = (predictions == targets).mean() * 100.
-        return accuracy, class_count
-
+            predict = inference_fn(output)
+        per_class_AP = utils.compute_weighted_AP(target, predict, 
+                                                     class_weight)
+        mAP = utils.compute_mAP(per_class_AP, self.subclass_idx)
+        result = {'output': output.cpu().numpy(), 
+                  'feature': feature.cpu().numpy(),
+                  'per_class_AP': per_class_AP,
+                  'mAP': mAP}
+        utils.save_pkl(result, os.path.join(self.save_path, save_name))
+        return mAP
+        
     def test(self):
-        # Test and save the result
-        state_dict = torch.load(os.path.join(self.save_path, 'ckpt.pth'))
-        self.load_state_dict(state_dict)
-        test_color_result = self._test(self.test_color_loader, test_on_color=True)
-        test_gray_result = self._test(self.test_gray_loader, test_on_color=False)
-        utils.save_pkl(test_color_result, os.path.join(self.save_path, 'test_color_result.pkl'))
-        utils.save_pkl(test_gray_result, os.path.join(self.save_path, 'test_gray_result.pkl'))
+        # Test and save the result for different inference methods
+        dev_mAP_conditional = self._compute_result('best-conditional.pth', self.dev_loader,
+                                  self.dev_target, self.dev_class_weight,
+                                  self.inference_conditional,
+                                  'dev_conditional_result.pkl', conditional=True)
+        test_mAP_conditional = self._compute_result('best-conditional.pth', self.test_loader,
+                                   self.test_target, self.test_class_weight,
+                                   self.inference_conditional,
+                                   'test_conditional_result.pkl', conditional=True)
+        
+        dev_mAP_max = self._compute_result('best-max.pth', self.dev_loader,
+                                  self.dev_target, self.dev_class_weight,
+                                  self.inference_max,
+                                  'dev_max_result.pkl')
+        test_mAP_max = self._compute_result('best-max.pth', self.test_loader,
+                                   self.test_target, self.test_class_weight,
+                                   self.inference_max,
+                                   'test_max_result.pkl')
+        
+        dev_mAP_sum_prob = self._compute_result('best-sum_prob.pth', self.dev_loader,
+                                  self.dev_target, self.dev_class_weight,
+                                  self.inference_sum_prob,
+                                  'dev_sum_prob_result.pkl')
+        test_mAP_sum_prob = self._compute_result('best-sum_prob.pth', self.test_loader,
+                                   self.test_target, self.test_class_weight,
+                                   self.inference_sum_prob,
+                                   'test_sum_prob_result.pkl')
 
-        bias_sum_conditional = 0
-        bias_sum_sum_out = 0
-        for i in range(10):
-            color_class = test_color_result['class_count_conditional'][i]
-            gray_class = test_gray_result['class_count_conditional'][i]
-            bias_sum_conditional += max(color_class, gray_class) / (color_class + gray_class)
-        bias_conditional = bias_sum_conditional / 10 - 0.5
-        for i in range(10):
-            color_class = test_color_result['class_count_sum_out'][i]
-            gray_class = test_gray_result['class_count_sum_out'][i]
-            bias_sum_sum_out += max(color_class, gray_class) / (color_class + gray_class)
-        bias_sum_out = bias_sum_sum_out / 10 - 0.5
-
-        # Output the classification accuracy on test set for different inference
-        # methods
-        info = ('Test on color images accuracy conditional: {}\n'
-                'Test on color images accuracy sum out: {}\n'
-                'Test on gray images accuracy conditional: {}\n'
-                'Test on gray images accuracy sum out: {}\n'
-                'Bias conditional: {}\n'
-                'Bias sum out: {}'
-                .format(test_color_result['accuracy_conditional'],
-                        test_color_result['accuracy_sum_out'],
-                        test_gray_result['accuracy_conditional'],
-                        test_gray_result['accuracy_sum_out'],
-                        bias_conditional,
-                        bias_sum_out
-                        ))
-        utils.write_info(os.path.join(self.save_path, 'test_result.txt'), info)
+        dev_mAP_sum_out = self._compute_result('best-sum_out.pth', self.dev_loader,
+                                  self.dev_target, self.dev_class_weight,
+                                  self.inference_sum_out,
+                                  'dev_sum_out_result.pkl')
+        test_mAP_sum_out = self._compute_result('best-sum_out.pth', self.test_loader,
+                                   self.test_target, self.test_class_weight,
+                                   self.inference_sum_out,
+                                   'test_sum_out_result.pkl')
+        
+        # Output the mean AP for the best model on dev and test set
+        info = (('Dev conditional mAP: {}, max mAP: {}, sum prob mAP: {}, sum out mAP: {}\n'
+                 'Test conditional mAP: {}, max mAP: {}, sum prob mAP: {}, sum out mAP: {}'
+                 ).format(dev_mAP_conditional, dev_mAP_max, dev_mAP_sum_prob, dev_mAP_sum_out,
+                          test_mAP_conditional, test_mAP_max, test_mAP_sum_prob, test_mAP_sum_out))
+        utils.write_info(os.path.join(self.save_path, 'result.txt'), info)
+        
+        
+        
+        
