@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from models import basenet
 from models import dataloader
 from models.cifar_core import CifarModel
@@ -30,6 +30,7 @@ class CifarDomainIndependent(CifarModel):
         total = 0
         correct = 0
         for i, (images, targets) in enumerate(loader):
+            images, targets = images.to(self.device), targets.to(self.device)
             self.optimizer.zero_grad()
             out_1, out_2, _ = self.forward(images)
             loss = self._criterion(out_1, out_2, targets)
