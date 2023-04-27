@@ -1,3 +1,8 @@
+This an improvement to the "Domain Independent Training" method in the paper. Clone this repo and follow the authors' instructions below. Run `independent_improve.ps1` (Powershell, Windows) or `independent_improve.sh` (Bash, Linux and macOS). Results goes to `record/cifar-s_domain_independent/update_in_turn` and `record/cifar-s_domain_independent/sum_loss_up`
+
+How did we improve it? We implemented the basic idea in Domain Independent Training, which is to train one classifier for each domain, which is isolated to other domains. It is coded in `ResNetDuoOut` in `basenet.py`.I tried two ways in updating the network with duo outputs. One with lower bias is in master branch and the other is in `dev1_n`. 
+
+----
 # Effective Strategies for Bias Mitigation
 Code for the CVPR paper:
 
@@ -19,6 +24,7 @@ year = {2020}
 * PyTorch 1.0+
 * h5py
 * tensorboardX
+* tqdm
 
 ## Data Preparation
 First download and unzip the CIFAR-10 and CINIC-10 by running the script `download.sh`
